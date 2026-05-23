@@ -65,6 +65,33 @@ Note that some images (like fedora) do not have a default root
 filesystem type. In this case adds the switch `--rootfs <type>`,
 e.g. `--rootfs btrfs`.
 
+### Rootless
+
+There is *experimental* support for rootless builds in `bootc-image-builder`. To perform a rootless build KVM is used. The above example can be tried like so:
+
+```bash
+# Ensure the image is fetched
+podman pull quay.io/fedora/fedora-bootc:latest
+mkdir output
+podman run \
+    --rm \
+    -it \
+    --privileged \
+    --pull=newer \
+    --security-opt label=type:unconfined_t \
+    -v ./config.toml:/config.toml:ro \
+    -v ./output:/output \
+    -v ~/.local/share/containers/storage:/var/lib/containers/storage \
+    quay.io/centos-bootc/bootc-image-builder:latest \
+    --in-vm \
+    --type qcow2 \
+    --use-librepo=True \
+    --rootfs ext4 \
+    quay.io/fedora/fedora-bootc:latest
+```
+
+Note the mounting of the users container storage, addition of the `--in-vm` argument and the removal of `sudo` in the commands.
+
 ### Running the resulting QCOW2 file on Linux (x86_64)
 
 A virtual machine can be launched using `qemu-system-x86_64` or with `virt-install` as shown below;
@@ -185,6 +212,44 @@ The following image types are currently available via the `--type` argument:
 ### pxe-tar-xz
 
 The container image being built must have the `dracut-live` and  `squashfs-tools` packages installed as well as a rebuilding the initramfs with the 'dmsquash-live' module.  See [osbuild documentation](https://github.com/osbuild/images/blob/main/data/files/pxetree/README) for more information and a sample Containerfile.
+
+### bootc-installer
+
+When building `bootc-installer` the positional container argument is expected to be a container that has Anaconda inside it; an example `Containerfile` for such a container is:
+
+```
+FROM your-favorite-bootc-container:latest
+RUN dnf install -y \
+     anaconda \
+     anaconda-install-env-deps \
+     anaconda-dracut \
+     dracut-config-generic \
+     dracut-network \
+     net-tools \
+     squashfs-tools \
+     grub2-efi-x64-cdboot \
+     python3-mako \
+     lorax-templates-* \
+     biosdevname \
+     prefixdevname \
+     && dnf clean all
+
+# On Fedora 42 this is necessary to get files in the right places
+# RUN dnf reinstall -y shim-x64
+
+# On Fedora 43 and up this is necessary to get files in the right
+# places
+RUN mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+
+# lorax wants to create a symlink in /mnt which points to /var/mnt
+# on bootc but /var/mnt does not exist on some images.
+#
+# If https://gitlab.com/fedora/bootc/base-images/-/merge_requests/294
+# gets merged this will be no longer needed
+RUN mkdir /var/mnt
+```
+
+You must also pass the `--bootc-installer-payload-ref` argument. This is a container reference to the payload to be installed by Anaconda. It will be embedded inside the installer and Anaconda will be configured to install it.
 
 ## 💾 Target architecture
 
